@@ -1,0 +1,9 @@
+## Interface: 120001
+## Title: Doors
+## Notes: A doors shootcut for dungeon and raid.
+## Author: Shawnliu1979
+## Version: 1.0
+## SavedVariables: DoorsSpellWatchDB
+
+DoorsData.lua
+DoorsUI.lua
