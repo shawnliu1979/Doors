@@ -2,7 +2,7 @@
 ## Title: Doors
 ## Notes: A doors shootcut for dungeon and raid.
 ## Author: Shawnliu1979
-## Version: 1.0
+## Version: 0.2-beta-12.0.5
 ## SavedVariables: DoorsSpellWatchDB
 
 DoorsData.lua
