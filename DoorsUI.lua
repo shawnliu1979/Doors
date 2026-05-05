@@ -50,6 +50,8 @@ local LOOT_ROW_HEIGHT = 62
 local LOOT_ROW_BUTTON_HEIGHT = 56
 local LOOT_TEXT_COLOR = { 0.64, 0.21, 0.93 } -- #A335EE
 local ROLL_CURRENCY_ID = 3418
+local ADDON_ICON_TEXTURE = "Interface/AddOns/Doors/icons/Doors-icon.tga"
+local ADDON_LDB_NAME = "Doors"
 
 local function DebugLog(message)
     if not DOORS_DEBUG then
@@ -2498,13 +2500,84 @@ debugEventFrame:SetScript("OnEvent", function(_, event, ...)
     DebugLog(string.format("cast event: %s castGUID=%s spellID=%s", event, tostring(castGUID), tostring(spellID)))
 end)
 
-SLASH_DOORS1 = "/doors"
-SlashCmdList["DOORS"] = function()
+local function ToggleDoorsFrame()
     if frame:IsShown() then
         frame:Hide()
     else
         frame:Show()
     end
+end
+
+local function EnsureDoorsSavedDB()
+    if type(DoorsSpellWatchDB) ~= "table" then
+        DoorsSpellWatchDB = {}
+    end
+
+    if type(DoorsSpellWatchDB.minimap) ~= "table" then
+        DoorsSpellWatchDB.minimap = {
+            hide = false,
+            minimapPos = 225,
+            showInCompartment = true,
+        }
+    end
+
+    if DoorsSpellWatchDB.minimap.showInCompartment == nil then
+        DoorsSpellWatchDB.minimap.showInCompartment = true
+    end
+
+    return DoorsSpellWatchDB
+end
+
+local function SetupMinimapLauncherWithLibDBIcon()
+    if not _G.LibStub then
+        DebugLog("LibStub not found, skip LibDBIcon registration")
+        return
+    end
+
+    local ldb = _G.LibStub("LibDataBroker-1.1", true)
+    local libDBIcon = _G.LibStub("LibDBIcon-1.0", true)
+
+    if not ldb or not libDBIcon then
+        DebugLog("LibDataBroker or LibDBIcon missing, skip minimap icon")
+        return
+    end
+
+    local db = EnsureDoorsSavedDB()
+    local minimapDB = db.minimap
+
+    local launcher = ldb:NewDataObject(ADDON_LDB_NAME, {
+        type = "launcher",
+        text = ADDON_LDB_NAME,
+        icon = ADDON_ICON_TEXTURE,
+        OnClick = function(_, mouseButton)
+            if mouseButton == "LeftButton" then
+                ToggleDoorsFrame()
+            end
+        end,
+        OnTooltipShow = function(tooltip)
+            tooltip:AddLine("Doors")
+            tooltip:AddLine("打开面板", 0.85, 0.85, 0.85)
+        end,
+    })
+
+    if not libDBIcon:IsRegistered(ADDON_LDB_NAME) then
+        libDBIcon:Register(ADDON_LDB_NAME, launcher, minimapDB)
+    else
+        libDBIcon:Refresh(ADDON_LDB_NAME, minimapDB)
+    end
+
+    if minimapDB.hide then
+        libDBIcon:Hide(ADDON_LDB_NAME)
+    else
+        libDBIcon:Show(ADDON_LDB_NAME)
+    end
+end
+
+SetupMinimapLauncherWithLibDBIcon()
+
+SLASH_DOORS1 = "/doors"
+SlashCmdList["DOORS"] = function()
+    ToggleDoorsFrame()
 end
 
 SLASH_DOORSDEBUG1 = "/doorsdebug"
