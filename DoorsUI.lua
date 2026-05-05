@@ -1,23 +1,36 @@
 local addonName = ...
 
 -- 这个文件专门负责 `/doors` 的界面。
+local SUPPORTED_SEASON_ID = "12.0-S1"
 
 local SEASON_FILTERS = {
-    { id = "12.0-S1", label = "12.0 S1" },
-    { id = "11.2-S3", label = "11.2 S3" },
-    { id = "11.1-S2", label = "11.1 S2" },
-    { id = "11.0-S1", label = "11.0 S1" },
-    { id = "ALL", label = "全部" },
+    { id = SUPPORTED_SEASON_ID, label = "12.0 S1" },
 }
 
-local activeSeasonFilter = "12.0-S1"
+local activeSeasonFilter = SUPPORTED_SEASON_ID
 local activeContentMode = "DUNGEON"
 
 local WOW_TIPS = (DoorsData and DoorsData.WOW_TIPS) or {}
 
 -- 副本数据表：
-local DUNGEONS = (DoorsData and DoorsData.DUNGEONS) or {}
-local RAIDS = (DoorsData and DoorsData.RAIDS) or {}
+local function FilterEntriesBySupportedSeason(entries)
+    local filtered = {}
+    for _, entry in ipairs(entries or {}) do
+        if entry and type(entry.seasons) == "table" then
+            for _, seasonID in ipairs(entry.seasons) do
+                if seasonID == SUPPORTED_SEASON_ID then
+                    filtered[#filtered + 1] = entry
+                    break
+                end
+            end
+        end
+    end
+
+    return filtered
+end
+
+local DUNGEONS = FilterEntriesBySupportedSeason((DoorsData and DoorsData.DUNGEONS) or {})
+local RAIDS = FilterEntriesBySupportedSeason((DoorsData and DoorsData.RAIDS) or {})
 local FINAL_BOSS_QUOTES = (DoorsData and DoorsData.FINAL_BOSS_QUOTES) or {}
 local DUNGEON_LOOT = (DoorsData and DoorsData.DUNGEON_LOOT) or {}
 
@@ -45,7 +58,6 @@ local SCROLL_VIEW_HEIGHT = FRAME_HEIGHT + SCROLL_TOP_Y - SCROLL_BOTTOM_Y
 local SCROLL_CONTENT_PADDING_BOTTOM = 12
 local DOORS_DEBUG = false
 
-local FORCE_LOOT_DEBUG_PRINT = true
 local LOOT_ROW_HEIGHT = 62
 local LOOT_ROW_BUTTON_HEIGHT = 56
 local LOOT_TEXT_COLOR = { 0.64, 0.21, 0.93 } -- #A335EE
@@ -62,7 +74,7 @@ local function DebugLog(message)
 end
 
 local function LootDebugPrint(message)
-    if not FORCE_LOOT_DEBUG_PRINT and not DOORS_DEBUG then
+    if not DOORS_DEBUG then
         return
     end
 
