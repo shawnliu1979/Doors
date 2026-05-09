@@ -1,25 +1,39 @@
 local addonName = ...
 
 -- 这个文件专门负责 `/doors` 的界面。
+local SUPPORTED_SEASON_ID = "12.0-S1"
 
 local SEASON_FILTERS = {
-    { id = "12.0-S1", label = "12.0 S1" },
-    { id = "11.2-S3", label = "11.2 S3" },
-    { id = "11.1-S2", label = "11.1 S2" },
-    { id = "11.0-S1", label = "11.0 S1" },
-    { id = "ALL", label = "全部" },
+    { id = SUPPORTED_SEASON_ID, label = "12.0 S1" },
 }
 
-local activeSeasonFilter = "12.0-S1"
+local activeSeasonFilter = SUPPORTED_SEASON_ID
 local activeContentMode = "DUNGEON"
 
 local WOW_TIPS = (DoorsData and DoorsData.WOW_TIPS) or {}
 
 -- 副本数据表：
-local DUNGEONS = (DoorsData and DoorsData.DUNGEONS) or {}
-local RAIDS = (DoorsData and DoorsData.RAIDS) or {}
+local function FilterEntriesBySupportedSeason(entries)
+    local filtered = {}
+    for _, entry in ipairs(entries or {}) do
+        if entry and type(entry.seasons) == "table" then
+            for _, seasonID in ipairs(entry.seasons) do
+                if seasonID == SUPPORTED_SEASON_ID then
+                    filtered[#filtered + 1] = entry
+                    break
+                end
+            end
+        end
+    end
+
+    return filtered
+end
+
+local DUNGEONS = FilterEntriesBySupportedSeason((DoorsData and DoorsData.DUNGEONS) or {})
+local RAIDS = FilterEntriesBySupportedSeason((DoorsData and DoorsData.RAIDS) or {})
 local FINAL_BOSS_QUOTES = (DoorsData and DoorsData.FINAL_BOSS_QUOTES) or {}
 local DUNGEON_LOOT = (DoorsData and DoorsData.DUNGEON_LOOT) or {}
+local RAID_LOOT = (DoorsData and DoorsData.RAID_LOOT) or {}
 
 local LOOT_CLASS_FILTERS = {
     { id = "PLAYER", label = "本角色" },
@@ -45,10 +59,10 @@ local SCROLL_VIEW_HEIGHT = FRAME_HEIGHT + SCROLL_TOP_Y - SCROLL_BOTTOM_Y
 local SCROLL_CONTENT_PADDING_BOTTOM = 12
 local DOORS_DEBUG = false
 
-local FORCE_LOOT_DEBUG_PRINT = true
 local LOOT_ROW_HEIGHT = 62
 local LOOT_ROW_BUTTON_HEIGHT = 56
 local LOOT_TEXT_COLOR = { 0.64, 0.21, 0.93 } -- #A335EE
+local FORCE_RUNTIME_EJ_LOOT = true
 local ROLL_CURRENCY_ID = 3418
 local ADDON_ICON_TEXTURE = "Interface/AddOns/Doors/icons/Doors-icon.tga"
 local ADDON_LDB_NAME = "Doors"
@@ -62,7 +76,7 @@ local function DebugLog(message)
 end
 
 local function LootDebugPrint(message)
-    if not FORCE_LOOT_DEBUG_PRINT and not DOORS_DEBUG then
+    if not DOORS_DEBUG then
         return
     end
 
@@ -202,7 +216,7 @@ local function HashTextForSeed(text)
     return total
 end
 
-local function BuildFallbackDropsForDungeon(entry)
+local function BuildFallbackDropsForEntry(entry)
     if not entry then
         return {}
     end
@@ -223,12 +237,21 @@ local function BuildFallbackDropsForDungeon(entry)
     return result
 end
 
-local function FindLootConfigForDungeon(entry)
-    if not entry or type(DUNGEON_LOOT) ~= "table" then
+local function GetLootConfigTable(contentMode)
+    if contentMode == "RAID" then
+        return RAID_LOOT
+    end
+
+    return DUNGEON_LOOT
+end
+
+local function FindLootConfigForEntry(entry, contentMode)
+    local lootConfigs = GetLootConfigTable(contentMode)
+    if not entry or type(lootConfigs) ~= "table" then
         return nil
     end
 
-    for _, lootConfig in ipairs(DUNGEON_LOOT) do
+    for _, lootConfig in ipairs(lootConfigs) do
         if lootConfig.name == entry.name or lootConfig.subtitle == entry.subtitle then
             return lootConfig
         end
@@ -317,7 +340,19 @@ local function ResolveLootSlotText(dropEntry)
     return dropEntry.slot or "未知部位"
 end
 
-local function GetTrackDifficultyIDs(trackID)
+local function GetTrackDifficultyIDs(trackID, contentMode)
+    if contentMode == "RAID" then
+        if trackID == "MYTH" then
+            return { 16, 15, 14, 17 }
+        end
+
+        if trackID == "HERO" then
+            return { 15, 14, 16, 17 }
+        end
+
+        return { 15, 14, 17, 16 }
+    end
+
     if trackID == "MYTH" then
         return { 8, 23, 24, 2, 1 }
     end
@@ -326,7 +361,15 @@ local function GetTrackDifficultyIDs(trackID)
         return { 8, 23, 2, 1, 24 }
     end
 
-    return { 23, 2, 1, 24, 8 }
+    return { 8, 23, 24, 2, 1 }
+end
+
+local function GetDisplayTrackID(contentMode)
+    if contentMode == "RAID" then
+        return "MYTH"
+    end
+
+    return "CHAMPION"
 end
 
 local function GetPlayerClassAndSpecForLootFilter()
@@ -858,7 +901,53 @@ local function EnsureEncounterJournalLoaded()
     return EJ_SelectInstance ~= nil and EJ_SetDifficulty ~= nil
 end
 
-local function EnrichStaticLootWithEncounterJournalLinks(lootConfig, trackID, lootScope)
+local function DumpCurrentEncounterJournalIDs()
+    if not EnsureEncounterJournalLoaded() then
+        print(string.format("[%s] 无法加载冒险指南。", addonName or "Doors"))
+        return
+    end
+
+    local getCurrentInstance = _G["EJ_GetCurrentInstance"]
+    local getInstanceInfo = _G["EJ_GetInstanceInfo"]
+    local getEncounterInfoByIndex = _G["EJ_GetEncounterInfoByIndex"]
+    if not getEncounterInfoByIndex then
+        print(string.format("[%s] 当前客户端没有可用的 EJ_GetEncounterInfoByIndex。", addonName or "Doors"))
+        return
+    end
+
+    local instanceID = (getCurrentInstance and getCurrentInstance()) or (EncounterJournal and EncounterJournal.instanceID)
+    if not instanceID then
+        print(string.format("[%s] 请先打开冒险指南，并切到目标副本页面后再执行此命令。", addonName or "Doors"))
+        return
+    end
+
+    local instanceName = (getInstanceInfo and select(1, getInstanceInfo(instanceID))) or ("Instance #" .. tostring(instanceID))
+    local encounterIDs = {}
+
+    print(string.format("[%s] 当前副本: %s", addonName or "Doors", tostring(instanceName)))
+    print(string.format("[%s] journalInstanceID = %d", addonName or "Doors", instanceID))
+
+    for index = 1, 40 do
+        local encounterName, _, encounterID = getEncounterInfoByIndex(index, instanceID)
+        if not encounterName then
+            break
+        end
+
+        if encounterID then
+            encounterIDs[#encounterIDs + 1] = encounterID
+            print(string.format("[%s] boss %d: %s -> %d", addonName or "Doors", index, tostring(encounterName), encounterID))
+        end
+    end
+
+    if #encounterIDs == 0 then
+        print(string.format("[%s] 未读取到 encounterID，请确认当前页面已选中具体副本。", addonName or "Doors"))
+        return
+    end
+
+    print(string.format("[%s] journalEncounterIDs = { %s }", addonName or "Doors", table.concat(encounterIDs, ", ")))
+end
+
+local function EnrichStaticLootWithEncounterJournalLinks(lootConfig, trackID, lootScope, contentMode)
     if not lootConfig or type(lootConfig.drops) ~= "table" or #lootConfig.drops == 0 then
         return nil
     end
@@ -925,12 +1014,58 @@ local function EnrichStaticLootWithEncounterJournalLinks(lootConfig, trackID, lo
                 ))
             end
         end
+
+                local function DumpCurrentEncounterJournalIDs()
+                    if not EnsureEncounterJournalLoaded() then
+                        print(string.format("[%s] 无法加载冒险指南。", addonName or "Doors"))
+                        return
+                    end
+
+                    local getCurrentInstance = _G["EJ_GetCurrentInstance"]
+                    local getInstanceInfo = _G["EJ_GetInstanceInfo"]
+                    local getEncounterInfoByIndex = _G["EJ_GetEncounterInfoByIndex"]
+                    if not getEncounterInfoByIndex then
+                        print(string.format("[%s] 当前客户端没有可用的 EJ_GetEncounterInfoByIndex。", addonName or "Doors"))
+                        return
+                    end
+
+                    local instanceID = (getCurrentInstance and getCurrentInstance()) or (EncounterJournal and EncounterJournal.instanceID)
+                    if not instanceID then
+                        print(string.format("[%s] 请先打开冒险指南，并切到目标副本页面后再执行此命令。", addonName or "Doors"))
+                        return
+                    end
+
+                    local instanceName = (getInstanceInfo and select(1, getInstanceInfo(instanceID))) or ("Instance #" .. tostring(instanceID))
+                    local encounterIDs = {}
+
+                    print(string.format("[%s] 当前副本: %s", addonName or "Doors", tostring(instanceName)))
+                    print(string.format("[%s] journalInstanceID = %d", addonName or "Doors", instanceID))
+
+                    for index = 1, 40 do
+                        local encounterName, _, encounterID = getEncounterInfoByIndex(index, instanceID)
+                        if not encounterName then
+                            break
+                        end
+
+                        if encounterID then
+                            encounterIDs[#encounterIDs + 1] = encounterID
+                            print(string.format("[%s] boss %d: %s -> %d", addonName or "Doors", index, tostring(encounterName), encounterID))
+                        end
+                    end
+
+                    if #encounterIDs == 0 then
+                        print(string.format("[%s] 未读取到 encounterID，请确认当前页面已选中具体副本。", addonName or "Doors"))
+                        return
+                    end
+
+                    print(string.format("[%s] journalEncounterIDs = { %s }", addonName or "Doors", table.concat(encounterIDs, ", ")))
+                end
     end
 
     local linkedByItemID = {}
     local linkedCount = 0
 
-    for _, difficultyID in ipairs(GetTrackDifficultyIDs(trackID)) do
+    for _, difficultyID in ipairs(GetTrackDifficultyIDs(trackID, contentMode)) do
         EJ_SetDifficulty(difficultyID)
 
         local lootCount = getNumLoot() or 0
@@ -997,7 +1132,7 @@ local function EnrichStaticLootWithEncounterJournalLinks(lootConfig, trackID, lo
     return nil
 end
 
-local function GetEncounterJournalLoot(lootConfig, trackID, lootScope)
+local function GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMode)
     if not lootConfig or not lootConfig.journalInstanceID or type(lootConfig.journalEncounterIDs) ~= "table" then
         return nil
     end
@@ -1016,6 +1151,11 @@ local function GetEncounterJournalLoot(lootConfig, trackID, lootScope)
 
     local getLootFilter = _G["EJ_GetLootFilter"]
     local setLootFilter = _G["EJ_SetLootFilter"]
+    if lootScope == "PLAYER" and not setLootFilter then
+        LootDebugPrint(string.format("%s: player filter api not ready", tostring(lootConfig and lootConfig.journalInstanceID or "unknown")))
+        return nil
+    end
+
     local previousFilterClassID, previousFilterSpecID = 0, 0
     if getLootFilter then
         local ok, classID, specID = pcall(getLootFilter)
@@ -1043,7 +1183,7 @@ local function GetEncounterJournalLoot(lootConfig, trackID, lootScope)
     end
 
     -- 按装等层级优先取对应难度，拿到当前层级的 itemLink（含品质/装等信息）。
-    local difficultyIDs = GetTrackDifficultyIDs(trackID)
+    local difficultyIDs = GetTrackDifficultyIDs(trackID, contentMode)
     local byItemID = {}
 
     EJ_SelectInstance(lootConfig.journalInstanceID)
@@ -1082,12 +1222,25 @@ local function GetEncounterJournalLoot(lootConfig, trackID, lootScope)
             itemID = ExtractItemIDFromLink(itemLink)
         end
 
-        if itemID and not byItemID[itemID] then
-            byItemID[itemID] = {
-                itemID = itemID,
-                itemLink = itemLink,
-                slot = slotText or "装备",
-            }
+        if itemID then
+            local existing = byItemID[itemID]
+            local shouldReplace = false
+
+            if not existing then
+                shouldReplace = true
+            elseif (not existing.itemLink or existing.itemLink == "") and itemLink and itemLink ~= "" then
+                shouldReplace = true
+            elseif itemLink and existing.itemLink and IsLinkCloserToTargetTrack(itemLink, existing.itemLink, trackID) then
+                shouldReplace = true
+            end
+
+            if shouldReplace then
+                byItemID[itemID] = {
+                    itemID = itemID,
+                    itemLink = itemLink,
+                    slot = slotText or "装备",
+                }
+            end
         end
     end
 
@@ -1154,7 +1307,7 @@ local function GetEncounterJournalLoot(lootConfig, trackID, lootScope)
     return entries
 end
 
-local function GetLootEntriesForDungeon(entry, trackID, lootScope)
+local function GetLootEntriesForEntry(entry, trackID, lootScope, contentMode)
     if not entry then
         return {}, false, true, "empty"
     end
@@ -1163,10 +1316,33 @@ local function GetLootEntriesForDungeon(entry, trackID, lootScope)
         return {}, true, false, "player-loading"
     end
 
-    local lootConfig = FindLootConfigForDungeon(entry)
+    local lootConfig = FindLootConfigForEntry(entry, contentMode)
+
+    local hasJournalConfig = lootConfig
+        and lootConfig.journalInstanceID
+        and type(lootConfig.journalEncounterIDs) == "table"
+        and #lootConfig.journalEncounterIDs > 0
+
+    -- 统一走冒险指南实时掉落；静态表仅保留为数据归档。
+    if FORCE_RUNTIME_EJ_LOOT and hasJournalConfig then
+        local runtimeDrops = GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMode)
+        if runtimeDrops and #runtimeDrops > 0 then
+            LootDebugPrint(string.format("%s: source=runtime-forced, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #runtimeDrops))
+            return runtimeDrops, true, false, "runtime"
+        end
+
+        if lootScope == "PLAYER" then
+            LootDebugPrint(string.format("%s: source=player-empty(forced-runtime), track=%s", entry.subtitle or entry.name or "unknown", tostring(trackID)))
+            return {}, true, false, "player-empty"
+        end
+
+        LootDebugPrint(string.format("%s: source=runtime-empty(forced-runtime), track=%s", entry.subtitle or entry.name or "unknown", tostring(trackID)))
+        return {}, true, false, "runtime-empty"
+    end
+
     if lootConfig and lootConfig.preferStatic and type(lootConfig.drops) == "table" and #lootConfig.drops > 0 then
         if lootScope == "PLAYER" then
-            local runtimePlayerDrops = GetEncounterJournalLoot(lootConfig, trackID, lootScope)
+            local runtimePlayerDrops = GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMode)
             if runtimePlayerDrops and #runtimePlayerDrops > 0 then
                 local runtimeByItemID = {}
                 for _, runtimeEntry in ipairs(runtimePlayerDrops) do
@@ -1197,12 +1373,17 @@ local function GetLootEntriesForDungeon(entry, trackID, lootScope)
                     return orderedPlayerDrops, true, false, "runtime-player-ordered"
                 end
             end
+
+            if contentMode == "RAID" and (not lootConfig.journalInstanceID or type(lootConfig.journalEncounterIDs) ~= "table") then
+                LootDebugPrint(string.format("%s: source=static-player-fallback, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #lootConfig.drops))
+                return lootConfig.drops, true, lootConfig.sample == true, "static-player-fallback"
+            end
         end
 
-        local enrichedStaticDrops = EnrichStaticLootWithEncounterJournalLinks(lootConfig, trackID, lootScope)
+        local enrichedStaticDrops = EnrichStaticLootWithEncounterJournalLinks(lootConfig, trackID, lootScope, contentMode)
         if enrichedStaticDrops and #enrichedStaticDrops > 0 then
             if lootScope == "ALL" and CountLinkedEntries(enrichedStaticDrops) < #enrichedStaticDrops then
-                local runtimeDropsForBackfill = GetEncounterJournalLoot(lootConfig, trackID, lootScope)
+                local runtimeDropsForBackfill = GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMode)
                 if runtimeDropsForBackfill and #runtimeDropsForBackfill > 0 then
                     enrichedStaticDrops = MergeLootEntriesPreferLinks(enrichedStaticDrops, runtimeDropsForBackfill)
                 end
@@ -1213,7 +1394,7 @@ local function GetLootEntriesForDungeon(entry, trackID, lootScope)
         end
 
         if lootScope == "PLAYER" then
-            local runtimePlayerDrops = GetEncounterJournalLoot(lootConfig, trackID, lootScope)
+            local runtimePlayerDrops = GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMode)
             if runtimePlayerDrops and #runtimePlayerDrops > 0 then
                 LootDebugPrint(string.format("%s: source=runtime-player, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #runtimePlayerDrops))
                 return runtimePlayerDrops, true, false, "runtime-player"
@@ -1227,10 +1408,24 @@ local function GetLootEntriesForDungeon(entry, trackID, lootScope)
         return lootConfig.drops, true, lootConfig.sample == true, "static"
     end
 
-    local runtimeDrops = GetEncounterJournalLoot(lootConfig, trackID, lootScope)
+    local runtimeDrops = GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMode)
     if runtimeDrops and #runtimeDrops > 0 then
         LootDebugPrint(string.format("%s: source=runtime, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #runtimeDrops))
         return runtimeDrops, true, false, "runtime"
+    end
+
+    if contentMode == "RAID" and lootScope == "PLAYER" and lootConfig and lootConfig.journalInstanceID and type(lootConfig.journalEncounterIDs) == "table" and #lootConfig.journalEncounterIDs > 0 then
+        local warmupAllDrops = GetEncounterJournalLoot(lootConfig, trackID, "ALL", contentMode)
+        local warmedPlayerDrops = GetEncounterJournalLoot(lootConfig, trackID, "PLAYER", contentMode)
+        if warmedPlayerDrops and #warmedPlayerDrops > 0 then
+            LootDebugPrint(string.format("%s: source=runtime-player-warmup, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #warmedPlayerDrops))
+            return warmedPlayerDrops, true, false, "runtime-player-warmup"
+        end
+
+        if warmupAllDrops and #warmupAllDrops > 0 then
+            LootDebugPrint(string.format("%s: source=runtime-all-warmup, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #warmupAllDrops))
+            return warmupAllDrops, true, false, "runtime-all-warmup"
+        end
     end
 
     if lootConfig and type(lootConfig.drops) == "table" and #lootConfig.drops > 0 then
@@ -1238,8 +1433,13 @@ local function GetLootEntriesForDungeon(entry, trackID, lootScope)
         return lootConfig.drops, true, lootConfig.sample == true, "static"
     end
 
+    if contentMode == "RAID" then
+        LootDebugPrint(string.format("%s: source=raid-unconfigured, track=%s", entry.subtitle or entry.name or "unknown", tostring(trackID)))
+        return {}, false, false, "raid-unconfigured"
+    end
+
     LootDebugPrint(string.format("%s: source=preview-fallback, track=%s", entry.subtitle or entry.name or "unknown", tostring(trackID)))
-    return BuildFallbackDropsForDungeon(entry), false, true, "fallback"
+    return BuildFallbackDropsForEntry(entry), false, true, "fallback"
 end
 
 -- 安全按钮在战斗中不能随意改施法属性。
@@ -1707,18 +1907,11 @@ local function SetLootButtonTooltip(button)
     if button.itemLink and GameTooltip.SetHyperlink then
         GameTooltip:SetHyperlink(button.itemLink)
     elseif button.itemID then
-        if button.lootScope == "ALL" and GameTooltip.SetItemByID then
-            GameTooltip:SetItemByID(button.itemID)
-        elseif button.lootScope == "ALL" then
-            GameTooltip:SetHyperlink("item:" .. tostring(button.itemID))
-        else
-            -- 本角色筛选下没有真实 itemLink 时，避免展示基础模板（如 ilvl 16）。
-            GameTooltip:ClearLines()
-            local itemName = button.itemName or (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(button.itemID)) or ("物品 #" .. tostring(button.itemID))
-            GameTooltip:AddLine(itemName, 1.0, 0.82, 0.20)
-            GameTooltip:AddLine("该条目当前没有可用物品链接，无法显示准确装等。", 0.82, 0.82, 0.82, true)
-            GameTooltip:AddLine(string.format("ItemID %d", button.itemID), 0.70, 0.70, 0.70)
-        end
+        GameTooltip:ClearLines()
+        local itemName = button.itemName or (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(button.itemID)) or ("物品 #" .. tostring(button.itemID))
+        GameTooltip:AddLine(itemName, 1.0, 0.82, 0.20)
+        GameTooltip:AddLine("该条目当前没有可用物品链接，无法显示准确装等。", 0.82, 0.82, 0.82, true)
+        GameTooltip:AddLine(string.format("ItemID %d", button.itemID), 0.70, 0.70, 0.70)
     end
     GameTooltip:Show()
 end
@@ -1751,8 +1944,9 @@ local function SetLootButtonTextColor(itemButton, dropEntry)
     itemButton.text:SetTextColor(LOOT_TEXT_COLOR[1], LOOT_TEXT_COLOR[2], LOOT_TEXT_COLOR[3])
 end
 
-local function GetLootButtonDetailText(dropEntry)
+local function GetLootButtonDetailText(dropEntry, contentMode)
     local slotText = ResolveLootSlotText(dropEntry)
+
     if dropEntry and dropEntry.itemLink and C_Item and C_Item.GetDetailedItemLevelInfo then
         local ok, itemLevel = pcall(C_Item.GetDetailedItemLevelInfo, dropEntry.itemLink)
         if ok and itemLevel and itemLevel > 0 then
@@ -1823,7 +2017,10 @@ local function OpenLootPreview(entry)
     end
 
     lootFrame.currentEntry = entry
-    local dropEntries, hasConfiguredLoot, isSampleData, lootSource = GetLootEntriesForDungeon(entry, "CHAMPION", lootFrame.lootScope)
+    lootFrame.currentContentMode = activeContentMode
+    local contentMode = lootFrame.currentContentMode or activeContentMode
+    local displayTrackID = GetDisplayTrackID(contentMode)
+    local dropEntries, hasConfiguredLoot, isSampleData, lootSource = GetLootEntriesForEntry(entry, displayTrackID, lootFrame.lootScope, contentMode)
     SortLootEntriesByPreferredOrder(dropEntries)
     lootFrame.subTitle:SetText(string.format("%s  (%s)", entry.subtitle or "未知副本", entry.name or "N/A"))
 
@@ -1841,9 +2038,15 @@ local function OpenLootPreview(entry)
             lootFrame.desc:SetText(string.format("当前筛选：本角色可用（初始化中，请稍候，当前%d件）。", dropCount))
         elseif lootSource == "runtime-player-ordered" then
             lootFrame.desc:SetText(string.format("当前筛选：本角色可用（%d件）。", dropCount))
+        elseif lootSource == "runtime-player-warmup" then
+            lootFrame.desc:SetText(string.format("当前筛选：本角色可用（%d件）。", dropCount))
+        elseif lootSource == "runtime-all-warmup" and lootFrame.lootScope == "PLAYER" then
+            lootFrame.desc:SetText(string.format("当前筛选：本角色可用（预热中，先展示%d件，稍后自动收敛）。", dropCount))
         else
             lootFrame.desc:SetText(string.format("当前筛选：%s可用（%d件）。", scopeLabel, dropCount))
         end
+    elseif lootSource == "raid-unconfigured" then
+        lootFrame.desc:SetText("该团本掉落尚未录入，后续可补充静态掉落或遇境日记索引。")
     elseif hasConfiguredLoot and isSampleData then
         lootFrame.desc:SetText(string.format("当前筛选：%s可用（%d件）。", scopeLabel, dropCount))
     else
@@ -1859,21 +2062,52 @@ local function OpenLootPreview(entry)
         end
     end
 
+    local unresolvedNameCount = 0
+    if C_Item and C_Item.GetItemNameByID then
+        for _, d in ipairs(dropEntries) do
+            if d and d.itemID then
+                local resolvedName = C_Item.GetItemNameByID(d.itemID)
+                if not resolvedName or resolvedName == "" then
+                    unresolvedNameCount = unresolvedNameCount + 1
+                end
+            end
+        end
+    end
+
     local shouldRetry = false
     if lootSource == "player-loading" then
         shouldRetry = true
     elseif lootSource == "player-empty" and lootFrame.lootScope == "PLAYER" then
         shouldRetry = true
+    elseif lootSource == "runtime-empty" then
+        shouldRetry = true
+    elseif lootSource == "runtime-all-warmup" and lootFrame.lootScope == "PLAYER" then
+        shouldRetry = true
+    elseif lootSource == "runtime" and missingLinkCount > 0 then
+        shouldRetry = true
+    elseif lootSource == "runtime-player" and missingLinkCount > 0 then
+        shouldRetry = true
+    elseif lootSource == "runtime-player-warmup" and missingLinkCount > 0 then
+        shouldRetry = true
     elseif lootSource == "runtime-player-ordered" and missingLinkCount > 0 then
         shouldRetry = true
     elseif lootSource == "static+ejlink" and missingLinkCount > 0 then
+        shouldRetry = true
+    elseif lootSource == "raid-unconfigured" and contentMode == "RAID" and entry then
+        local lootConfig = FindLootConfigForEntry(entry, contentMode)
+        if lootConfig and lootConfig.journalInstanceID and type(lootConfig.journalEncounterIDs) == "table" and #lootConfig.journalEncounterIDs > 0 then
+            shouldRetry = true
+        end
+    end
+
+    if unresolvedNameCount > 0 then
         shouldRetry = true
     end
 
     if shouldRetry then
         local retryEntries = dropEntries
         if (lootSource == "player-loading" or (lootSource == "player-empty" and lootFrame.lootScope == "PLAYER")) and entry then
-            local lootConfig = FindLootConfigForDungeon(entry)
+            local lootConfig = FindLootConfigForEntry(entry, contentMode)
             if lootConfig and type(lootConfig.drops) == "table" then
                 retryEntries = lootConfig.drops
             end
@@ -1923,6 +2157,7 @@ local function OpenLootPreview(entry)
             itemButton.itemID = dropEntry.itemID
             itemButton.itemName = itemName
             itemButton.lootScope = lootFrame.lootScope
+            itemButton.contentMode = contentMode
             if dropEntry.itemLink then
                 itemButton.itemLink = dropEntry.itemLink
             else
@@ -1936,7 +2171,7 @@ local function OpenLootPreview(entry)
 
             itemButton.text:SetText(itemName)
             if itemButton.subText then
-                itemButton.subText:SetText(GetLootButtonDetailText(dropEntry))
+                itemButton.subText:SetText(GetLootButtonDetailText(dropEntry, contentMode))
             end
             SetLootButtonTextColor(itemButton, dropEntry)
             itemButton:Show()
@@ -1945,6 +2180,7 @@ local function OpenLootPreview(entry)
             itemButton.itemName = nil
             itemButton.itemLink = nil
             itemButton.lootScope = nil
+            itemButton.contentMode = nil
             if itemButton.subText then
                 itemButton.subText:SetText("")
             end
@@ -2593,4 +2829,10 @@ SlashCmdList["DOORSDEBUG"] = function(msg)
     end
 
     print(string.format("[%s] debug %s", addonName or "Doors", DOORS_DEBUG and "ON" or "OFF"))
+end
+
+SLASH_DOORSJOURNAL1 = "/doorsjournal"
+SLASH_DOORSJOURNAL2 = "/doorsej"
+SlashCmdList["DOORSJOURNAL"] = function()
+    DumpCurrentEncounterJournalIDs()
 end
