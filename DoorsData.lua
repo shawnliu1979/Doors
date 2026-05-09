@@ -398,6 +398,47 @@ DoorsData.DUNGEON_LOOT = {
     },
 }
 
+-- 团本掉落表：结构与 DUNGEON_LOOT 保持一致。
+-- 当前先把 12.0-S1 团本入口预留出来，后续可直接补 journal 信息或静态掉落池。
+DoorsData.RAID_LOOT = {
+    {
+        name = "The Voidspire",
+        subtitle = "虚影尖塔",
+        sample = false,
+        preferStatic = true,
+        journalInstanceID = 1307,
+        journalEncounterIDs = { 2733, 2734, 2736, 2735, 2737, 2738 },
+        drops = {},
+    },
+    {
+        name = "The Dreamrift",
+        subtitle = "梦境裂隙",
+        sample = false,
+        preferStatic = true,
+        journalInstanceID = 1314,
+        journalEncounterIDs = { 2795 },
+        drops = {
+            { itemID = 249278, slot = "装备" },
+            { itemID = 249922, slot = "装备" },
+            { itemID = 249371, slot = "装备" },
+            { itemID = 249374, slot = "装备" },
+            { itemID = 249381, slot = "装备" },
+            { itemID = 249373, slot = "装备" },
+            { itemID = 249805, slot = "装备" },
+            { itemID = 249343, slot = "装备" },
+        },
+    },
+    {
+        name = "Assault on Quel'Danas",
+        subtitle = "进军奎尔丹纳斯",
+        sample = false,
+        preferStatic = true,
+        journalInstanceID = 1308,
+        journalEncounterIDs = { 2739, 2740 },
+        drops = {},
+    },
+}
+
 -- 团本数据表：当前用于数据归档，spellID 未知可留 nil。
 DoorsData.RAIDS = {
     {
@@ -409,6 +450,12 @@ DoorsData.RAIDS = {
     {
         name = "The Dreamrift",
         subtitle = "梦境裂隙",
+        spellID = nil,
+        seasons = { "12.0-S1" },
+    },
+    {
+        name = "Assault on Quel'Danas",
+        subtitle = "进军奎尔丹纳斯",
         spellID = nil,
         seasons = { "12.0-S1" },
     },
@@ -496,6 +543,12 @@ DoorsData.FINAL_BOSS_QUOTES = {
         {
             name = "The Dreamrift",
             subtitle = "梦境裂隙",
+            finalBoss = "待补充",
+            quotes = {},
+        },
+        {
+            name = "Assault on Quel'Danas",
+            subtitle = "进军奎尔丹纳斯",
             finalBoss = "待补充",
             quotes = {},
         },
