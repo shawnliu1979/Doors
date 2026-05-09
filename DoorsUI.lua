@@ -44,6 +44,7 @@ local LOOT_CLASS_FILTERS = {
 
 local DEFAULT_ENTRY_ICON = 136243
 local DEFAULT_ENTRY_COLOR = {0.58, 0.58, 0.62}
+local CARD_TEXTURE_SOURCE_ASPECT = 16 / 9
 
 -- 这些布局常量集中放在一起，后面如果你要继续微调样式，改这里最直接。
 local FRAME_WIDTH = 660
@@ -262,6 +263,218 @@ local function FindLootConfigForEntry(entry, contentMode)
     return nil
 end
 
+local JOURNAL_CARD_TEXTURE_CACHE = {}
+
+local function IsValidJournalTexture(value)
+    return type(value) == "number" or (type(value) == "string" and value ~= "")
+end
+
+local function IsSmallOrIconLikeTexture(value)
+    if type(value) ~= "string" then
+        return false
+    end
+
+    local lowered = string.lower(value)
+    return string.find(lowered, "small", 1, true) ~= nil
+        or string.find(lowered, "icon", 1, true) ~= nil
+        or string.find(lowered, "portrait", 1, true) ~= nil
+end
+
+local function IsLikelyTexturePath(value)
+    if type(value) ~= "string" or value == "" then
+        return false
+    end
+
+    return string.find(value, "\\", 1, true) ~= nil
+        or string.find(value, "/", 1, true) ~= nil
+end
+
+local function GetJournalTexturePreferenceScore(candidate, index)
+    if not IsValidJournalTexture(candidate) then
+        return -1
+    end
+
+    -- 数字 fileID 无法做路径关键词判断，按 EJ 常见字段顺序给基础优先级。
+    if type(candidate) == "number" then
+        if index == 6 then
+            return 120
+        elseif index == 4 then
+            return 110
+        elseif index == 5 then
+            return 90
+        elseif index == 3 then
+            return 80
+        end
+        return 50
+    end
+
+    if not IsLikelyTexturePath(candidate) or IsSmallOrIconLikeTexture(candidate) then
+        return -1
+    end
+
+    local lowered = string.lower(candidate)
+    local score = 0
+
+    if string.find(lowered, "button2", 1, true) ~= nil or string.find(lowered, "large", 1, true) ~= nil then
+        score = score + 140
+    elseif string.find(lowered, "bg", 1, true) ~= nil or string.find(lowered, "background", 1, true) ~= nil then
+        score = score + 130
+    elseif string.find(lowered, "button1", 1, true) ~= nil then
+        score = score + 100
+    elseif string.find(lowered, "lore", 1, true) ~= nil then
+        score = score + 90
+    else
+        score = score + 70
+    end
+
+    if index == 6 then
+        score = score + 20
+    elseif index == 4 then
+        score = score + 16
+    elseif index == 5 then
+        score = score + 12
+    elseif index == 3 then
+        score = score + 8
+    end
+
+    return score
+end
+
+local function GetJournalCardTextureByInstanceID(journalInstanceID)
+    if not journalInstanceID then
+        return nil
+    end
+
+    if JOURNAL_CARD_TEXTURE_CACHE[journalInstanceID] ~= nil then
+        local cached = JOURNAL_CARD_TEXTURE_CACHE[journalInstanceID]
+        if cached == false then
+            return nil
+        end
+        return cached
+    end
+
+    if not (EJ_SelectInstance and EJ_SetDifficulty) then
+        local isAddOnLoaded = _G["IsAddOnLoaded"]
+        local loadAddOn = _G["LoadAddOn"]
+        if isAddOnLoaded and loadAddOn and not isAddOnLoaded("Blizzard_EncounterJournal") then
+            pcall(loadAddOn, "Blizzard_EncounterJournal")
+        end
+    end
+
+    if not (EJ_SelectInstance and EJ_SetDifficulty) then
+        JOURNAL_CARD_TEXTURE_CACHE[journalInstanceID] = false
+        return nil
+    end
+
+    local getInstanceInfo = _G["EJ_GetInstanceInfo"]
+    if not getInstanceInfo then
+        JOURNAL_CARD_TEXTURE_CACHE[journalInstanceID] = false
+        return nil
+    end
+
+    local result = { pcall(getInstanceInfo, journalInstanceID) }
+    local ok = result[1]
+    if not ok then
+        JOURNAL_CARD_TEXTURE_CACHE[journalInstanceID] = false
+        return nil
+    end
+
+    table.remove(result, 1)
+    local info = result
+
+    -- EJ_GetInstanceInfo 返回字段通常是：
+    -- 1=name, 2=description, 3=bg, 4=button1, 5=lore, 6=button2
+    -- 这里优先使用冒险指南卡片贴图字段，避免误用大背景导致只看到局部。
+    local preferredFieldOrder = { 6, 4, 5, 3 }
+    for _, fieldIndex in ipairs(preferredFieldOrder) do
+        local candidate = info[fieldIndex]
+        if IsValidJournalTexture(candidate) and (type(candidate) == "number" or IsLikelyTexturePath(candidate)) then
+            LootDebugPrint(string.format("EJ texture picked: instance=%s field=%d value=%s", tostring(journalInstanceID), fieldIndex, tostring(candidate)))
+            JOURNAL_CARD_TEXTURE_CACHE[journalInstanceID] = candidate
+            return candidate
+        end
+    end
+
+    local texture = nil
+    local bestScore = -1
+
+    for index, candidate in ipairs(info) do
+        local score = GetJournalTexturePreferenceScore(candidate, index)
+        if score > bestScore then
+            bestScore = score
+            texture = candidate
+        end
+    end
+
+    if not texture then
+        for _, candidate in ipairs(info) do
+            if IsValidJournalTexture(candidate) then
+                texture = candidate
+                break
+            end
+        end
+    end
+
+    JOURNAL_CARD_TEXTURE_CACHE[journalInstanceID] = texture or false
+    return texture
+end
+
+local function GetCardTextureForEntry(entry, contentMode)
+    if entry then
+        local lootConfig = FindLootConfigForEntry(entry, contentMode)
+        if lootConfig and lootConfig.journalInstanceID then
+            local journalTexture = GetJournalCardTextureByInstanceID(lootConfig.journalInstanceID)
+            if journalTexture then
+                return journalTexture
+            end
+        end
+
+        if entry.fallbackIcon then
+            return entry.fallbackIcon
+        end
+    end
+
+    return DEFAULT_ENTRY_ICON
+end
+
+local function ApplyCardTextureTexCoord(texture)
+    if not texture or not texture.SetTexCoord then
+        return
+    end
+
+    local left, right, top, bottom = 0, 1, 0, 1
+    local cardAspect = BUTTON_WIDTH / BUTTON_HEIGHT
+    local textureAspect = CARD_TEXTURE_SOURCE_ASPECT
+
+    if texture.GetTextureFileSize then
+        local sourceWidth, sourceHeight = texture:GetTextureFileSize()
+        if sourceWidth and sourceHeight and sourceWidth > 0 and sourceHeight > 0 then
+            textureAspect = sourceWidth / sourceHeight
+        end
+    end
+
+    -- 中央对齐铺满整卡（cover）：纹理按比例放大到覆盖按钮，多余部分从中心裁切。
+    if textureAspect > cardAspect then
+        local visibleRatio = cardAspect / textureAspect
+        local trim = (1 - visibleRatio) / 2
+        left = trim
+        right = 1 - trim
+    else
+        local visibleRatio = textureAspect / cardAspect
+        local trim = (1 - visibleRatio) / 2
+        top = trim
+        bottom = 1 - trim
+    end
+
+    texture:SetTexCoord(left, right, top, bottom)
+
+    if texture.ClearAllPoints and texture.SetPoint then
+        texture:ClearAllPoints()
+        texture:SetPoint("TOPLEFT", 1, -1)
+        texture:SetPoint("BOTTOMRIGHT", -1, 1)
+    end
+end
+
 local RUNTIME_LOOT_CACHE = {}
 
 local function ExtractItemIDFromLink(itemLink)
@@ -343,27 +556,13 @@ local function ResolveLootSlotText(dropEntry)
 end
 
 local function GetTrackDifficultyIDs(trackID, contentMode)
+    -- 当前入口固定：团本=MYTH，地下城=CHAMPION。
+    -- 这里按内容类型直接返回目标难度，避免多难度混查带来低装等混入。
     if contentMode == "RAID" then
-        if trackID == "MYTH" then
-            return { 16, 15, 14, 17 }
-        end
-
-        if trackID == "HERO" then
-            return { 15, 14, 16, 17 }
-        end
-
-        return { 15, 14, 17, 16 }
+        return { 16 }
     end
 
-    if trackID == "MYTH" then
-        return { 8, 23, 24, 2, 1 }
-    end
-
-    if trackID == "HERO" then
-        return { 8, 23, 2, 1, 24 }
-    end
-
-    return { 8, 23, 24, 2, 1 }
+    return { 23 }
 end
 
 local function GetDisplayTrackID(contentMode)
@@ -829,7 +1028,7 @@ local function CountLinkedEntries(entries)
     return total
 end
 
-local function MergeLootEntriesPreferLinks(primaryEntries, secondaryEntries)
+local function MergeLootEntriesPreferLinks(primaryEntries, secondaryEntries, trackID)
     local mergedByItemID = {}
 
     for _, entry in ipairs(primaryEntries or {}) do
@@ -851,10 +1050,19 @@ local function MergeLootEntriesPreferLinks(primaryEntries, secondaryEntries)
                     itemLink = entry.itemLink,
                     slot = entry.slot,
                 }
-            elseif (not existing.itemLink or existing.itemLink == "") and entry.itemLink and entry.itemLink ~= "" then
-                existing.itemLink = entry.itemLink
-                if entry.slot and entry.slot ~= "" then
-                    existing.slot = entry.slot
+            elseif entry.itemLink and entry.itemLink ~= "" then
+                local shouldReplaceLink = false
+                if not existing.itemLink or existing.itemLink == "" then
+                    shouldReplaceLink = true
+                elseif trackID and IsLinkCloserToTargetTrack(entry.itemLink, existing.itemLink, trackID) then
+                    shouldReplaceLink = true
+                end
+
+                if shouldReplaceLink then
+                    existing.itemLink = entry.itemLink
+                    if entry.slot and entry.slot ~= "" then
+                        existing.slot = entry.slot
+                    end
                 end
             end
         end
@@ -872,6 +1080,63 @@ local function MergeLootEntriesPreferLinks(primaryEntries, secondaryEntries)
     end
 
     return merged
+end
+
+local function BuildLootDisplayDedupKey(entry)
+    if not entry then
+        return nil
+    end
+
+    local slotText = ResolveLootSlotText(entry)
+    local itemName = nil
+    if entry.itemID and C_Item and C_Item.GetItemNameByID then
+        itemName = C_Item.GetItemNameByID(entry.itemID)
+    end
+
+    if itemName and itemName ~= "" then
+        return string.format("name:%s|slot:%s", string.lower(itemName), tostring(slotText or ""))
+    end
+
+    return string.format("id:%s|slot:%s", tostring(entry.itemID or 0), tostring(slotText or ""))
+end
+
+local function DeduplicateLootEntries(entries, trackID)
+    local result = {}
+    local indexByKey = {}
+
+    for _, entry in ipairs(entries or {}) do
+        if entry and entry.itemID then
+            local key = BuildLootDisplayDedupKey(entry)
+            local existingIndex = key and indexByKey[key] or nil
+            if not existingIndex then
+                result[#result + 1] = {
+                    itemID = entry.itemID,
+                    itemLink = entry.itemLink,
+                    slot = entry.slot,
+                }
+                if key then
+                    indexByKey[key] = #result
+                end
+            else
+                local existing = result[existingIndex]
+                local shouldReplace = false
+
+                if entry.itemLink and entry.itemLink ~= "" and (not existing.itemLink or existing.itemLink == "") then
+                    shouldReplace = true
+                elseif trackID and entry.itemLink and existing.itemLink and IsLinkCloserToTargetTrack(entry.itemLink, existing.itemLink, trackID) then
+                    shouldReplace = true
+                end
+
+                if shouldReplace then
+                    existing.itemID = entry.itemID
+                    existing.itemLink = entry.itemLink
+                    existing.slot = entry.slot
+                end
+            end
+        end
+    end
+
+    return result
 end
 
 local function KeepOnlyLinkedEntries(entries)
@@ -953,6 +1218,19 @@ local function EnrichStaticLootWithEncounterJournalLinks(lootConfig, trackID, lo
     end
 
     EJ_SelectInstance(lootConfig.journalInstanceID)
+    local getCurrentInstance = _G["EJ_GetCurrentInstance"]
+    if getCurrentInstance then
+        local activeInstanceID = tonumber(getCurrentInstance())
+        if activeInstanceID and activeInstanceID ~= tonumber(lootConfig.journalInstanceID) then
+            LootDebugPrint(string.format(
+                "instance select mismatch: wanted=%s active=%s",
+                tostring(lootConfig.journalInstanceID),
+                tostring(activeInstanceID)
+            ))
+
+            return nil
+        end
+    end
 
     local didOverrideFilter = false
     if setLootFilter then
@@ -1087,7 +1365,7 @@ local function GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMo
     if RUNTIME_LOOT_CACHE[cacheKey] then
         local cachedEntries = RUNTIME_LOOT_CACHE[cacheKey]
         if CountLinkedEntries(cachedEntries) == #cachedEntries then
-            return cachedEntries
+            return CopyLootEntries(cachedEntries)
         end
 
         RUNTIME_LOOT_CACHE[cacheKey] = nil
@@ -1098,6 +1376,18 @@ local function GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMo
     local byItemID = {}
 
     EJ_SelectInstance(lootConfig.journalInstanceID)
+    local getCurrentInstance = _G["EJ_GetCurrentInstance"]
+    if getCurrentInstance then
+        local activeInstanceID = tonumber(getCurrentInstance())
+        if activeInstanceID and activeInstanceID ~= tonumber(lootConfig.journalInstanceID) then
+            LootDebugPrint(string.format(
+                "runtime instance select mismatch: wanted=%s active=%s",
+                tostring(lootConfig.journalInstanceID),
+                tostring(activeInstanceID)
+            ))
+            return nil
+        end
+    end
 
     local didOverrideFilter = false
     if setLootFilter then
@@ -1135,17 +1425,17 @@ local function GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMo
 
         if itemID then
             local existing = byItemID[itemID]
-            local shouldReplace = false
+            local should_replace = false
 
             if not existing then
-                shouldReplace = true
+                should_replace = true
             elseif (not existing.itemLink or existing.itemLink == "") and itemLink and itemLink ~= "" then
-                shouldReplace = true
+                should_replace = true
             elseif itemLink and existing.itemLink and IsLinkCloserToTargetTrack(itemLink, existing.itemLink, trackID) then
-                shouldReplace = true
+                should_replace = true
             end
 
-            if shouldReplace then
+            if should_replace then
                 byItemID[itemID] = {
                     itemID = itemID,
                     itemLink = itemLink,
@@ -1156,12 +1446,12 @@ local function GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMo
     end
 
     for _, encounterID in ipairs(lootConfig.journalEncounterIDs) do
-        if selectEncounter then
-            selectEncounter(encounterID)
-        end
-
         for _, difficultyID in ipairs(difficultyIDs) do
             EJ_SetDifficulty(difficultyID)
+
+            if selectEncounter then
+                selectEncounter(encounterID)
+            end
 
             if getLootInfoByIndex then
                 local index = 1
@@ -1214,8 +1504,10 @@ local function GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMo
         return nil
     end
 
-    RUNTIME_LOOT_CACHE[cacheKey] = entries
-    return entries
+    entries = DeduplicateLootEntries(entries, trackID)
+
+    RUNTIME_LOOT_CACHE[cacheKey] = CopyLootEntries(entries)
+    return CopyLootEntries(entries)
 end
 
 local function GetLootEntriesForEntry(entry, trackID, lootScope, contentMode)
@@ -1234,114 +1526,43 @@ local function GetLootEntriesForEntry(entry, trackID, lootScope, contentMode)
         and type(lootConfig.journalEncounterIDs) == "table"
         and #lootConfig.journalEncounterIDs > 0
 
-    -- 统一走冒险指南实时掉落；静态表仅保留为数据归档。
-    if FORCE_RUNTIME_EJ_LOOT and hasJournalConfig then
+    if hasJournalConfig then
         local runtimeDrops = GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMode)
         if runtimeDrops and #runtimeDrops > 0 then
-            LootDebugPrint(string.format("%s: source=runtime-forced, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #runtimeDrops))
+            if lootScope == "PLAYER" then
+                local allScopeDrops = GetEncounterJournalLoot(lootConfig, trackID, "ALL", contentMode)
+                if allScopeDrops and #allScopeDrops > 0 then
+                    runtimeDrops = MergeLootEntriesPreferLinks(runtimeDrops, allScopeDrops, trackID)
+                end
+            end
+
+            runtimeDrops = DeduplicateLootEntries(runtimeDrops, trackID)
+
+            LootDebugPrint(string.format("%s: source=runtime, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #runtimeDrops))
             return runtimeDrops, true, false, "runtime"
         end
 
+        if contentMode == "RAID" and lootScope == "PLAYER" then
+            local warmupAllDrops = GetEncounterJournalLoot(lootConfig, trackID, "ALL", contentMode)
+            local warmedPlayerDrops = GetEncounterJournalLoot(lootConfig, trackID, "PLAYER", contentMode)
+            if warmedPlayerDrops and #warmedPlayerDrops > 0 then
+                LootDebugPrint(string.format("%s: source=runtime-player-warmup, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #warmedPlayerDrops))
+                return warmedPlayerDrops, true, false, "runtime-player-warmup"
+            end
+
+            if warmupAllDrops and #warmupAllDrops > 0 then
+                LootDebugPrint(string.format("%s: source=runtime-all-warmup, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #warmupAllDrops))
+                return warmupAllDrops, true, false, "runtime-all-warmup"
+            end
+        end
+
         if lootScope == "PLAYER" then
-            LootDebugPrint(string.format("%s: source=player-empty(forced-runtime), track=%s", entry.subtitle or entry.name or "unknown", tostring(trackID)))
+            LootDebugPrint(string.format("%s: source=player-empty(runtime-only), track=%s", entry.subtitle or entry.name or "unknown", tostring(trackID)))
             return {}, true, false, "player-empty"
         end
 
-        LootDebugPrint(string.format("%s: source=runtime-empty(forced-runtime), track=%s", entry.subtitle or entry.name or "unknown", tostring(trackID)))
+        LootDebugPrint(string.format("%s: source=runtime-empty(runtime-only), track=%s", entry.subtitle or entry.name or "unknown", tostring(trackID)))
         return {}, true, false, "runtime-empty"
-    end
-
-    if lootConfig and lootConfig.preferStatic and type(lootConfig.drops) == "table" and #lootConfig.drops > 0 then
-        if lootScope == "PLAYER" then
-            local runtimePlayerDrops = GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMode)
-            if runtimePlayerDrops and #runtimePlayerDrops > 0 then
-                local runtimeByItemID = {}
-                for _, runtimeEntry in ipairs(runtimePlayerDrops) do
-                    if runtimeEntry and runtimeEntry.itemID then
-                        runtimeByItemID[runtimeEntry.itemID] = runtimeEntry
-                    end
-                end
-
-                local orderedPlayerDrops = {}
-                for _, configuredEntry in ipairs(lootConfig.drops) do
-                    local matched = runtimeByItemID[configuredEntry.itemID]
-                    if matched then
-                        local resolvedSlot = matched.slot
-                        if not resolvedSlot or resolvedSlot == "" or resolvedSlot == "未知部位" then
-                            resolvedSlot = configuredEntry.slot
-                        end
-
-                        orderedPlayerDrops[#orderedPlayerDrops + 1] = {
-                            itemID = matched.itemID,
-                            itemLink = matched.itemLink,
-                            slot = resolvedSlot,
-                        }
-                    end
-                end
-
-                if #orderedPlayerDrops > 0 then
-                    LootDebugPrint(string.format("%s: source=runtime-player-ordered, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #orderedPlayerDrops))
-                    return orderedPlayerDrops, true, false, "runtime-player-ordered"
-                end
-            end
-
-            if contentMode == "RAID" and (not lootConfig.journalInstanceID or type(lootConfig.journalEncounterIDs) ~= "table") then
-                LootDebugPrint(string.format("%s: source=static-player-fallback, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #lootConfig.drops))
-                return lootConfig.drops, true, lootConfig.sample == true, "static-player-fallback"
-            end
-        end
-
-        local enrichedStaticDrops = EnrichStaticLootWithEncounterJournalLinks(lootConfig, trackID, lootScope, contentMode)
-        if enrichedStaticDrops and #enrichedStaticDrops > 0 then
-            if lootScope == "ALL" and CountLinkedEntries(enrichedStaticDrops) < #enrichedStaticDrops then
-                local runtimeDropsForBackfill = GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMode)
-                if runtimeDropsForBackfill and #runtimeDropsForBackfill > 0 then
-                    enrichedStaticDrops = MergeLootEntriesPreferLinks(enrichedStaticDrops, runtimeDropsForBackfill)
-                end
-            end
-
-            LootDebugPrint(string.format("%s: source=static+ejlink, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #enrichedStaticDrops))
-            return enrichedStaticDrops, true, lootConfig.sample == true, "static+ejlink"
-        end
-
-        if lootScope == "PLAYER" then
-            local runtimePlayerDrops = GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMode)
-            if runtimePlayerDrops and #runtimePlayerDrops > 0 then
-                LootDebugPrint(string.format("%s: source=runtime-player, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #runtimePlayerDrops))
-                return runtimePlayerDrops, true, false, "runtime-player"
-            end
-
-            LootDebugPrint(string.format("%s: source=player-empty, track=%s", entry.subtitle or entry.name or "unknown", tostring(trackID)))
-            return {}, true, false, "player-empty"
-        end
-
-        LootDebugPrint(string.format("%s: source=static, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #lootConfig.drops))
-        return lootConfig.drops, true, lootConfig.sample == true, "static"
-    end
-
-    local runtimeDrops = GetEncounterJournalLoot(lootConfig, trackID, lootScope, contentMode)
-    if runtimeDrops and #runtimeDrops > 0 then
-        LootDebugPrint(string.format("%s: source=runtime, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #runtimeDrops))
-        return runtimeDrops, true, false, "runtime"
-    end
-
-    if contentMode == "RAID" and lootScope == "PLAYER" and lootConfig and lootConfig.journalInstanceID and type(lootConfig.journalEncounterIDs) == "table" and #lootConfig.journalEncounterIDs > 0 then
-        local warmupAllDrops = GetEncounterJournalLoot(lootConfig, trackID, "ALL", contentMode)
-        local warmedPlayerDrops = GetEncounterJournalLoot(lootConfig, trackID, "PLAYER", contentMode)
-        if warmedPlayerDrops and #warmedPlayerDrops > 0 then
-            LootDebugPrint(string.format("%s: source=runtime-player-warmup, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #warmedPlayerDrops))
-            return warmedPlayerDrops, true, false, "runtime-player-warmup"
-        end
-
-        if warmupAllDrops and #warmupAllDrops > 0 then
-            LootDebugPrint(string.format("%s: source=runtime-all-warmup, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #warmupAllDrops))
-            return warmupAllDrops, true, false, "runtime-all-warmup"
-        end
-    end
-
-    if lootConfig and type(lootConfig.drops) == "table" and #lootConfig.drops > 0 then
-        LootDebugPrint(string.format("%s: source=static-fallback, track=%s, count=%d", entry.subtitle or entry.name or "unknown", tostring(trackID), #lootConfig.drops))
-        return lootConfig.drops, true, lootConfig.sample == true, "static"
     end
 
     if contentMode == "RAID" then
@@ -1564,22 +1785,33 @@ local function UpdateButtonState(button, dungeon)
     if button.Tint then
         if isKnown then
             if isCoolingDown then
-                button.Tint:SetColorTexture(0.60, 0.44, 0.20, 0.24)
+                button.Tint:SetColorTexture(0.60, 0.44, 0.20, 0.12)
             else
-                button.Tint:SetColorTexture(entryColor[1], entryColor[2], entryColor[3], 0.24)
+                button.Tint:SetColorTexture(entryColor[1], entryColor[2], entryColor[3], 0.08)
             end
         else
-            button.Tint:SetColorTexture(0.40, 0.40, 0.40, 0.20)
+            button.Tint:SetColorTexture(0.22, 0.22, 0.22, 0.06)
         end
     end
 
     if button.Splash then
-        if isKnown then
-            button.Splash:SetDesaturated(isCoolingDown)
-            button.Splash:SetAlpha(isCoolingDown and 0.85 or 1.0)
+        -- 未学会/未配置的卡片统一灰度显示，已学会保持彩色（冷却中可轻微降饱和）。
+        local shouldGrayOut = (not isKnown)
+        button.Splash:SetDesaturated(shouldGrayOut or isCoolingDown)
+        if isCoolingDown then
+            button.Splash:SetAlpha(0.92)
+        elseif isKnown then
+            button.Splash:SetAlpha(1.0)
         else
-            button.Splash:SetDesaturated(true)
-            button.Splash:SetAlpha(0.72)
+            button.Splash:SetAlpha(0.86)
+        end
+    end
+
+    if button.SplashShade then
+        if isKnown then
+            button.SplashShade:SetColorTexture(0, 0, 0, 0.14)
+        else
+            button.SplashShade:SetColorTexture(0, 0, 0, 0.30)
         end
     end
 
@@ -1587,7 +1819,7 @@ local function UpdateButtonState(button, dungeon)
         if isKnown then
             button.Name:SetTextColor(1.0, 0.95, 0.84)
         else
-            button.Name:SetTextColor(0.74, 0.74, 0.74)
+            button.Name:SetTextColor(0.90, 0.88, 0.82)
         end
     end
 
@@ -1595,7 +1827,7 @@ local function UpdateButtonState(button, dungeon)
         if isKnown then
             button.EnglishName:SetTextColor(0.75, 0.75, 0.75)
         else
-            button.EnglishName:SetTextColor(0.58, 0.58, 0.58)
+            button.EnglishName:SetTextColor(0.68, 0.68, 0.68)
         end
     end
 
@@ -1873,11 +2105,12 @@ RefreshVisibleButtons = function()
             end
 
             if entryButton.Splash then
-                entryButton.Splash:SetTexture(entry.fallbackIcon or DEFAULT_ENTRY_ICON)
+                entryButton.Splash:SetTexture(GetCardTextureForEntry(entry, activeContentMode))
+                ApplyCardTextureTexCoord(entryButton.Splash)
             end
 
             if entryButton.Tint then
-                entryButton.Tint:SetColorTexture(entryColor[1], entryColor[2], entryColor[3], 0.24)
+                entryButton.Tint:SetColorTexture(entryColor[1], entryColor[2], entryColor[3], 0.10)
             end
 
             entryButton:Show()
@@ -2121,24 +2354,23 @@ for index = 1, maxEntryCount do
     -- 最底层深色底板，让卡片从主面板里“浮”出来。
     button.Background = button:CreateTexture(nil, "BACKGROUND")
     button.Background:SetAllPoints()
-    button.Background:SetColorTexture(0.05, 0.05, 0.07, 0.95)
+    button.Background:SetColorTexture(0.05, 0.05, 0.07, 0.25)
 
     -- 一层主题色氛围，提供每个副本自己的色调。
     button.Tint = button:CreateTexture(nil, "BORDER")
     button.Tint:SetAllPoints()
-    button.Tint:SetColorTexture(entryColor[1], entryColor[2], entryColor[3], 0.24)
+    button.Tint:SetColorTexture(entryColor[1], entryColor[2], entryColor[3], 0.10)
 
-    -- 左侧海报图保持紧凑，右侧留给中英文名称。
+    -- 使用整卡铺图，风格向冒险指南靠拢。
     button.Splash = button:CreateTexture(nil, "ARTWORK")
     button.Splash:SetPoint("TOPLEFT", 1, -1)
-    button.Splash:SetPoint("BOTTOMLEFT", 1, 1)
-    button.Splash:SetWidth(84)
-    button.Splash:SetTexture((dungeon and dungeon.fallbackIcon) or DEFAULT_ENTRY_ICON)
-    button.Splash:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    button.Splash:SetPoint("BOTTOMRIGHT", -1, 1)
+    button.Splash:SetTexture(GetCardTextureForEntry(dungeon, "DUNGEON"))
+    ApplyCardTextureTexCoord(button.Splash)
 
     button.SplashShade = button:CreateTexture(nil, "ARTWORK")
     button.SplashShade:SetAllPoints(button.Splash)
-    button.SplashShade:SetColorTexture(0, 0, 0, 0.34)
+    button.SplashShade:SetColorTexture(0, 0, 0, 0.14)
 
     button.InnerGlow = button:CreateTexture(nil, "BORDER")
     button.InnerGlow:SetPoint("TOPLEFT", 1, -1)
@@ -2168,19 +2400,19 @@ for index = 1, maxEntryCount do
     button.BorderRight:SetColorTexture(1, 1, 1, 0.12)
 
     button.HeaderAccent = button:CreateTexture(nil, "OVERLAY")
-    button.HeaderAccent:SetPoint("TOPLEFT", 98, -10)
+    button.HeaderAccent:SetPoint("TOPLEFT", 16, -10)
     button.HeaderAccent:SetSize(40, 2)
 
     button.Name = button:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    button.Name:SetPoint("TOPLEFT", 98, -18)
-    button.Name:SetWidth(BUTTON_WIDTH - 110)
+    button.Name:SetPoint("TOPLEFT", 16, -18)
+    button.Name:SetWidth(BUTTON_WIDTH - 28)
     button.Name:SetJustifyH("LEFT")
     button.Name:SetWordWrap(false)
     button.Name:SetText((dungeon and dungeon.subtitle) or "")
 
     button.EnglishName = button:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     button.EnglishName:SetPoint("TOPLEFT", button.Name, "BOTTOMLEFT", 0, -4)
-    button.EnglishName:SetWidth(BUTTON_WIDTH - 110)
+    button.EnglishName:SetWidth(BUTTON_WIDTH - 28)
     button.EnglishName:SetJustifyH("LEFT")
     button.EnglishName:SetWordWrap(false)
     button.EnglishName:SetText((dungeon and dungeon.name) or "")

@@ -156,9 +156,22 @@ local function OpenLootPreview(entry)
         return
     end
 
-    lootFrame.currentEntry = entry
     lootFrame.currentContentMode = GetActiveContentMode and GetActiveContentMode() or "DUNGEON"
     local contentMode = lootFrame.currentContentMode or "DUNGEON"
+
+    local retryKey = string.format(
+        "%s|%s|%s|%s",
+        tostring(entry and (entry.name or entry.subtitle) or "unknown"),
+        tostring(entry and (entry.subtitle or entry.name) or "unknown"),
+        tostring(lootFrame.lootScope or "PLAYER"),
+        tostring(contentMode)
+    )
+    if lootFrame.lastRetryKey ~= retryKey then
+        lootFrame.linkRetryCount = 0
+        lootFrame.lastRetryKey = retryKey
+    end
+
+    lootFrame.currentEntry = entry
     local displayTrackID = GetDisplayTrackID(contentMode)
     local dropEntries, hasConfiguredLoot, isSampleData, lootSource = GetLootEntriesForEntry(entry, displayTrackID, lootFrame.lootScope, contentMode)
     SortLootEntriesByPreferredOrder(dropEntries)
@@ -231,8 +244,6 @@ local function OpenLootPreview(entry)
         shouldRetry = true
     elseif lootSource == "runtime-player-ordered" and missingLinkCount > 0 then
         shouldRetry = true
-    elseif lootSource == "static+ejlink" and missingLinkCount > 0 then
-        shouldRetry = true
     elseif lootSource == "raid-unconfigured" and contentMode == "RAID" and entry then
         local lootConfig = FindLootConfigForEntry(entry, contentMode)
         if lootConfig and lootConfig.journalInstanceID and type(lootConfig.journalEncounterIDs) == "table" and #lootConfig.journalEncounterIDs > 0 then
@@ -246,12 +257,6 @@ local function OpenLootPreview(entry)
 
     if shouldRetry then
         local retryEntries = dropEntries
-        if (lootSource == "player-loading" or (lootSource == "player-empty" and lootFrame.lootScope == "PLAYER")) and entry then
-            local lootConfig = FindLootConfigForEntry(entry, contentMode)
-            if lootConfig and type(lootConfig.drops) == "table" then
-                retryEntries = lootConfig.drops
-            end
-        end
 
         local requestLoadItemDataByID = C_Item and C_Item.RequestLoadItemDataByID
         if requestLoadItemDataByID then
