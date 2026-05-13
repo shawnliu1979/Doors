@@ -19,8 +19,10 @@ local SetLootButtonTextColor = shared.SetLootButtonTextColor
 local GetLootButtonDetailText = shared.GetLootButtonDetailText
 local LootDebugPrint = shared.LootDebugPrint
 
+
 local lootFrame = CreateFrame("Frame", "DoorsLootPreviewFrame", UIParent, "BasicFrameTemplateWithInset")
 lootFrame:SetSize(420, 500)
+-- 初始默认贴合在主窗体右侧
 lootFrame:SetPoint("LEFT", frame, "RIGHT", 16, 0)
 lootFrame:SetMovable(true)
 lootFrame:EnableMouse(true)
@@ -29,6 +31,23 @@ lootFrame:SetScript("OnDragStart", lootFrame.StartMoving)
 lootFrame:SetScript("OnDragStop", lootFrame.StopMovingOrSizing)
 lootFrame:Hide()
 table.insert(UISpecialFrames, "DoorsLootPreviewFrame")
+
+
+-- 打开预览时始终重置位置
+local function SnapLootFrameToMain()
+    lootFrame:ClearAllPoints()
+    lootFrame:SetPoint("LEFT", frame, "RIGHT", 16, 0)
+end
+
+
+-- 始终先吸附再打开预览
+local function OpenLootPreviewSnap(entry)
+    SnapLootFrameToMain()
+    -- 调用原始实现
+    if lootFrame._realOpenPreview then
+        lootFrame._realOpenPreview(entry)
+    end
+end
 
 lootFrame.TitleText:SetText("副本掉落预览")
 
@@ -340,9 +359,14 @@ local function OpenLootPreview(entry)
     lootFrame:Show()
 end
 
-lootFrame.OpenPreview = OpenLootPreview
+
+-- 保存原始实现，覆盖为snap版本
+lootFrame._realOpenPreview = OpenLootPreview
+lootFrame.OpenPreview = OpenLootPreviewSnap
+
+
 shared.lootFrame = lootFrame
-shared.OpenLootPreview = OpenLootPreview
+shared.OpenLootPreview = lootFrame.OpenPreview
 shared.HideLootPreview = function()
     if lootFrame:IsShown() then
         lootFrame:Hide()
