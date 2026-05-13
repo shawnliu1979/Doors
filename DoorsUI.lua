@@ -1658,10 +1658,11 @@ local function GetDungeonState(dungeon)
     end
 
     if isConfigured then
-        return "未学会", 1.00, 0.82, 0.40, "当前角色还没有学会。"
+        -- 柔和淡紫色，更有色彩感，区别于已学会的绿色和灰度
+        return "未学会", 0.72, 0.62, 1.00, "当前角色还没有学会。"
     end
 
-    return "待配置", 0.92, 0.92, 0.92, "spellID 还没填，所以当前展示的是 UI 原型。"
+    return "未开放", 0.92, 0.92, 0.92, "该团本暂未开放传送功能。"
 end
 
 local function GetOpenDoorHint(dungeon)
@@ -1676,19 +1677,11 @@ local function GetOpenDoorHint(dungeon)
         return nil
     end
 
-    if not isConfigured then
-        if activeContentMode == "RAID" then
-            return {
-                "开门条件：",
-                "1) 该团本若有对应传送法术，需先学会后才能点亮。",
-                "2) 学会后卡片会变为可用，点击即可尝试传送。",
-            }
-        end
-
+    if not isConfigured and activeContentMode == "RAID" then
         return {
             "开门条件：",
-            "1) 在史诗钥石模式限时完成该地下城 +10（或更高）。",
-            "2) 达成后会解锁该本个人传送，卡片会自动点亮。",
+            "1) 该团本传送法术暂未开放，敬请期待后续官方更新。",
+            "2) 功能上线后将自动在此处显示传送入口。",
         }
     end
 
@@ -1795,15 +1788,12 @@ local function UpdateButtonState(button, dungeon)
     end
 
     if button.Splash then
-        -- 未学会/未配置的卡片统一灰度显示，已学会保持彩色（冷却中可轻微降饱和）。
-        local shouldGrayOut = (not isKnown)
-        button.Splash:SetDesaturated(shouldGrayOut or isCoolingDown)
+        -- 所有状态都保持彩色，仅冷却时轻微降饱和
+        button.Splash:SetDesaturated(isCoolingDown)
         if isCoolingDown then
             button.Splash:SetAlpha(0.92)
-        elseif isKnown then
-            button.Splash:SetAlpha(1.0)
         else
-            button.Splash:SetAlpha(0.86)
+            button.Splash:SetAlpha(1.0)
         end
     end
 
