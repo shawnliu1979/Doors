@@ -148,30 +148,34 @@ local function FindBossQuoteEntry(entry)
 end
 
 local function BuildBossLine(entry)
-    local quoteEntry = FindBossQuoteEntry(entry)
-    if not quoteEntry then
-        return nil
-    end
-
-    local bossName = quoteEntry.finalBoss
-    if not bossName or bossName == "" then
-        bossName = "尾王"
-    end
-
-    local line = nil
-    if type(quoteEntry.quotes) == "table" and #quoteEntry.quotes > 0 then
-        line = quoteEntry.quotes[math.random(#quoteEntry.quotes)]
-    end
-
-    if not line or line == "" then
-        if quoteEntry.finalBoss and quoteEntry.finalBoss ~= "待补充" then
-            line = "你们的结局，到此为止。"
+    -- 固定用语+门后boss台词+种族口号
+    local playerName = UnitName and UnitName("player") or "玩家"
+    local instanceName = (entry and entry.subtitle) or (entry and entry.name) or "副本"
+    local playerRace = UnitRace and UnitRace("player") or "未知种族"
+        local sloganList = (DoorsData and DoorsData.RACE_SLOGANS and DoorsData.RACE_SLOGANS[playerRace])
+        local slogan = nil
+        if sloganList and type(sloganList) == "table" then
+            slogan = sloganList[math.random(#sloganList)]
         else
-            return nil
+            slogan = "为了联盟/部落！"
+        end
+
+    -- 获取boss名和嘲讽
+    local bossName, bossQuote = nil, nil
+    local quoteEntry = FindBossQuoteEntry and FindBossQuoteEntry(entry)
+    if quoteEntry then
+        bossName = quoteEntry.finalBoss or "尾王"
+        if type(quoteEntry.quotes) == "table" and #quoteEntry.quotes > 0 then
+            bossQuote = quoteEntry.quotes[1]
         end
     end
+    bossName = bossName or "尾王"
+    bossQuote = bossQuote or "是谁在那边捣乱？"
 
-    return string.format("[尾王·%s] %s", bossName, line)
+    return string.format(
+        "%s, 我们英勇无比的%s用【Doors】插件开启了一扇通往%s的大门。门的那边传来了[%s]的声音：'%s'",
+        slogan, playerName, instanceName, bossName, bossQuote
+    )
 end
 
 local function SendBossLineToParty(entry)
@@ -189,7 +193,20 @@ local function SendBossLineToParty(entry)
         return
     end
 
-    print(string.format("[%s] %s", addonName or "Doors", bossLine))
+    if IsInRaid and IsInRaid() then
+        if C_ChatInfo and C_ChatInfo.SendChatMessage then
+            C_ChatInfo.SendChatMessage(bossLine, "RAID")
+        else
+            print(string.format("[%s] %s", addonName or "Doors", bossLine))
+        end
+        return
+    end
+
+    if C_ChatInfo and C_ChatInfo.SendChatMessage then
+        C_ChatInfo.SendChatMessage(bossLine, "SAY")
+    else
+        print(string.format("[%s] %s", addonName or "Doors", bossLine))
+    end
 end
 
 -- 掉落表缺数据时使用预览池兜底，这样 UI 演示不会中断。
@@ -2182,28 +2199,29 @@ frame.footer = frame.footerRight
 
 frame.footerLeft:SetPoint("RIGHT", frame.footerRight, "LEFT", -14, 0)
 
+
 local function GetRollCurrencyProgressText()
     if not C_CurrencyInfo or not C_CurrencyInfo.GetCurrencyInfo then
-        return "晦暗虚空核心 : ?/?"
+        return "晦暗虚空核心 : ?/?/?"
     end
 
     local info = C_CurrencyInfo.GetCurrencyInfo(ROLL_CURRENCY_ID)
     if not info then
-        return "晦暗虚空核心 : ?/?"
+        return "晦暗虚空核心 : ?/?/?"
     end
 
     local quantity = tonumber(info.quantity) or 0
+    local totalEarned = tonumber(info.totalEarned) or 0
     local seasonCap = tonumber(info.maxQuantity) or 0
-
     if seasonCap <= 0 then
         seasonCap = tonumber(info.maxWeeklyQuantity) or 0
     end
 
     if seasonCap > 0 then
-        return string.format("晦暗虚空核心 : %d/%d", quantity, seasonCap)
+        return string.format("晦暗虚空核心 : %d/%d/%d", quantity, totalEarned, seasonCap)
     end
 
-    return string.format("晦暗虚空核心 : %d/?", quantity)
+    return string.format("晦暗虚空核心 : %d/%d/?", quantity, totalEarned)
 end
 
 local function RefreshFooterCurrency()
@@ -2427,6 +2445,11 @@ for index = 1, maxEntryCount do
 
         if mouseButton == "RightButton" and shared.OpenLootPreview then
             shared.OpenLootPreview(self.dungeon)
+            return
+        end
+
+        if mouseButton == "LeftButton" then
+            SendBossLineToParty(self.dungeon)
         end
     end)
 
