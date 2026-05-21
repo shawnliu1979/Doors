@@ -263,7 +263,7 @@ DoorsData.FINAL_BOSS_QUOTES = {
         {
             name = "Magisters' Terrace",
             subtitle = "魔导师平台",
-            finalBoss = "凯尔萨斯·逐日者",
+            finalBoss = "迪詹崔乌斯",
             quotes = {
                 "仅仅是挫折而已！",
                 "你们很快就会理解，反抗毫无意义。",
@@ -344,7 +344,7 @@ DoorsData.FINAL_BOSS_QUOTES = {
         {
             name = "The Voidspire",
             subtitle = "虚影尖塔",
-            finalBoss = "萨尔哈达尔（待最终确认）",
+            finalBoss = "宇宙之冕",
             quotes = {
                 "你们攀登得越高，坠入虚空就越深。",
                 "在这里，现实只剩下被吞噬的命运。",
@@ -353,13 +353,13 @@ DoorsData.FINAL_BOSS_QUOTES = {
         {
             name = "The Dreamrift",
             subtitle = "梦境裂隙",
-            finalBoss = "待补充",
+            finalBoss = "奇美鲁斯, 未梦之神",
             quotes = {},
         },
         {
             name = "Assault on Quel'Danas",
             subtitle = "进军奎尔丹纳斯",
-            finalBoss = "待补充",
+            finalBoss = "贝洛朗, 奥的子嗣",
             quotes = {},
         },
     },
