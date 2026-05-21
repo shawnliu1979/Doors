@@ -178,7 +178,22 @@ local function BuildBossLine(entry)
     )
 end
 
+-- 防成迷喊话冷却机制
+local lastPortalShoutTime = 0
+local PORTAL_SHOUT_COOLDOWN = 5 -- 秒
+
 local function SendBossLineToParty(entry)
+    local now = GetTime and GetTime() or time()
+    if lastPortalShoutTime and (now - lastPortalShoutTime) < PORTAL_SHOUT_COOLDOWN then
+        if UIErrorsFrame then
+            UIErrorsFrame:AddMessage("请勿频繁点击，成熟一点！", 1.0, 0.2, 0.2, 1.0)
+        else
+            print("[Doors] 请勿频繁点击，成熟一点！")
+        end
+        return
+    end
+    lastPortalShoutTime = now
+
     local bossLine = BuildBossLine(entry)
     if not bossLine then
         return
