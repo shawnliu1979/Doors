@@ -1,9 +1,9 @@
-## Interface: 120001, 120005
+## Interface: 120001, 120005, 120007
 ## Title: Doors
 ## Notes: Quick access helper for dungeons and raids.
 ## IconTexture: Interface/AddOns/Doors/icons/Doors-icon.tga
 ## Author: Shawnliu1979
-## Version: 1.0.1-12.0.5
+## Version: 1.0.3-12.0.7
 ## OptionalDeps: LibStub, CallbackHandler-1.0, LibDataBroker-1.1, LibDBIcon-1.0
 ## Category-enUS: Dungeons & Raids
 ## Category-deDE: Dungeons & Schlachtzuege
