@@ -233,7 +233,7 @@ DoorsData.RAID_LOOT = {
     },
     {
         name = "Sporefall",
-        subtitle = "孢子陷落",
+        subtitle = "孢陨幽境",
         sample = false,
         journalInstanceID = 1305,
         journalEncounterIDs = { 2711 },
@@ -263,7 +263,7 @@ DoorsData.RAIDS = {
     },
     {
         name = "Sporefall",
-        subtitle = "孢子陷落",
+        subtitle = "孢陨幽境",
         spellID = nil,
         seasons = { "12.0-S1" },
     },
@@ -378,7 +378,7 @@ DoorsData.FINAL_BOSS_QUOTES = {
         },
         {
             name = "Sporefall",
-            subtitle = "孢子陷落",
+            subtitle = "孢陨幽境",
             finalBoss = "腐沼",
             quotes = {},
         },
