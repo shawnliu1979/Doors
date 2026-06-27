@@ -231,6 +231,14 @@ DoorsData.RAID_LOOT = {
         journalEncounterIDs = { 2739, 2740 },
         drops = {},
     },
+    {
+        name = "Sporefall",
+        subtitle = "孢子陷落",
+        sample = false,
+        journalInstanceID = 1305,
+        journalEncounterIDs = { 2711 },
+        drops = {},
+    },
 }
 
 -- 团本数据表：当前用于数据归档，spellID 未知可留 nil。
@@ -250,6 +258,12 @@ DoorsData.RAIDS = {
     {
         name = "Assault on Quel'Danas",
         subtitle = "进军奎尔丹纳斯",
+        spellID = nil,
+        seasons = { "12.0-S1" },
+    },
+    {
+        name = "Sporefall",
+        subtitle = "孢子陷落",
         spellID = nil,
         seasons = { "12.0-S1" },
     },
@@ -360,6 +374,12 @@ DoorsData.FINAL_BOSS_QUOTES = {
             name = "Assault on Quel'Danas",
             subtitle = "进军奎尔丹纳斯",
             finalBoss = "贝洛朗, 奥的子嗣",
+            quotes = {},
+        },
+        {
+            name = "Sporefall",
+            subtitle = "孢子陷落",
+            finalBoss = "腐沼",
             quotes = {},
         },
     },
