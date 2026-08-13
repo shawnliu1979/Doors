@@ -3,13 +3,18 @@ local shared = _G.DoorsUIShared or {}
 _G.DoorsUIShared = shared
 
 -- 这个文件专门负责 `/doors` 的界面。
-local SUPPORTED_SEASON_ID = "12.0-S1"
-
-local SEASON_FILTERS = {
-    { id = SUPPORTED_SEASON_ID, label = "12.0 S1" },
+local SUPPORTED_SEASONS = {
+    ["12.0-S1"] = true,
+    ["12.1-S2"] = true,
 }
 
-local activeSeasonFilter = SUPPORTED_SEASON_ID
+local SEASON_FILTERS = {
+    { id = "12.0-S1", label = "12.0 S1" },
+    { id = "12.1-S2", label = "12.1 S2" },
+    { id = "ALL", label = "All" },
+}
+
+local activeSeasonFilter = "12.1-S2"
 local activeContentMode = "DUNGEON"
 
 local WOW_TIPS = (DoorsData and DoorsData.WOW_TIPS) or {}
@@ -20,7 +25,7 @@ local function FilterEntriesBySupportedSeason(entries)
     for _, entry in ipairs(entries or {}) do
         if entry and type(entry.seasons) == "table" then
             for _, seasonID in ipairs(entry.seasons) do
-                if seasonID == SUPPORTED_SEASON_ID then
+                if SUPPORTED_SEASONS[seasonID] then
                     filtered[#filtered + 1] = entry
                     break
                 end
